@@ -1,36 +1,42 @@
 ---
 name: mdc
-description: Format any content — summaries, branch/commit descriptions, review notes, reports, explanations, snippets from the conversation — as clean GitHub-flavored Markdown and copy it to the macOS clipboard with pbcopy so the user can paste it anywhere (Slack, GitLab MR descriptions, Notion, Asana, docs). Use this whenever the user says "copy to my clipboard", "pbcopy", "copy it so I can paste", "give me markdown I can paste", or asks for a summary/description "in md format" together with copying — even if they don't say the word clipboard but clearly want paste-ready output.
+description: Copy paste-ready GitHub-flavored Markdown to the macOS clipboard with pbcopy. Use when the user wants any content — composed (summary, MR description, review note), an existing file, or a passage from this conversation — on their clipboard to paste elsewhere (Slack, GitLab, Notion, Asana), whether they say "copy", "pbcopy", or just ask for paste-ready markdown.
 ---
 
 # mdc
 
-Turn requested content into paste-ready GitHub-flavored Markdown and put it
-on the macOS clipboard. macOS-only: if `pbcopy` is missing, say so and
-deliver the file instead.
+Put paste-ready GitHub-flavored Markdown on the macOS clipboard. If `pbcopy`
+is missing, say so and deliver a file instead.
+
+## Routing — pick the cheapest writer by where the content lives
+
+| Content lives… | Route | Content tokens in main context |
+|---|---|---|
+| Already a file, no reformatting | `SOURCE` = that path; go to step 2 | 0 |
+| On disk but needs composing (a diff, files, a plan to trim) | Dispatch ONE cheap agent (`tlor:dwarf-smith` `model: haiku`; `tlor:gondor-builder` if summarizing needs judgment) with pointers only — paths, line ranges, git refs, NEVER the content; it runs steps 1–4 itself | ~0 |
+| Said verbatim in the conversation | Run `python3 ${CLAUDE_SKILL_DIR}/scripts/session_to_md.py <session-id> --copy` (add `-o` for a file; `--last N`/`--all` to widen) | ~0 |
+| New or reworked text | Compose and write inline (step 1) | 1× — the minimum; dispatching doubles it (prompt + write) |
+
+No dispatch when already inside a subagent or in plan mode (plan-mode state
+propagates; the agent can't write files or the clipboard).
 
 ## Steps
 
 1. **Compose** clean GFM: one `#` title, `##` sections, bullets over prose
-   walls; inline code for identifiers, fenced blocks with a language tag.
-   Plain pasteable text — no ANSI colors, no `cat -n` line-number prefixes,
-   no HTML unless asked. Match the source material's language; scale length
-   to the ask (a "summary" is a screenful, not a spec).
-2. **Write** it to `{scratchpad}/clipboard.md` (create the directory if
-   needed) — a file, not echo/heredoc: backticks, `$`, and quotes break
-   shell quoting in subtle ways and the clipboard silently ends up mangled.
-   Don't leave copies in the user's project tree.
-3. **Copy**: `pbcopy < {scratchpad}/clipboard.md`
-4. **Verify**: `pbpaste | cmp -s - {scratchpad}/clipboard.md` — exit 0 means
-   the clipboard matches the file. If it fails, retry steps 3–4 once; if it
-   still fails, report the failure honestly (likely cause: another process
-   wrote the clipboard between copy and verify) — never claim it was copied.
-5. **Report** in 1–2 lines: what was copied (title + line count) plus the
-   file path as fallback. Do NOT paste the full content back into chat. If
-   the content is sensitive (credentials, personal data), offer to delete
-   the scratchpad file once the user confirms the paste succeeded.
+   walls, inline code for identifiers, fenced blocks with a language tag; no
+   ANSI colors, line-number prefixes, or HTML unless asked; match the source
+   language; scale length to the ask. Write it to `{scratchpad}/clipboard.md`
+   = `SOURCE` — always via a file write, never echo/heredoc (backticks, `$`,
+   and quotes break shell quoting and silently mangle the clipboard). Don't
+   leave copies in the user's project tree.
+2. **Copy**: `pbcopy < $SOURCE`
+3. **Verify**: `pbpaste | cmp -s - $SOURCE` — exit 0 is a pass; a
+   trailing-newline-only diff also passes. On failure retry steps 2–3 once,
+   then report the failure honestly — never claim it was copied.
+4. **Report** in 1–2 lines: title + line count + `SOURCE` path as fallback;
+   don't paste the content back into chat. If the content is sensitive and
+   `SOURCE` is a scratchpad file the skill created, offer to delete it once
+   the paste is confirmed.
 
-## Iterating
-
-If the user says "too long", "add X", "change the tone": edit the same
-scratchpad file and re-run steps 3–5. Same file, same path — no v2 copies.
+Iterating ("too long", "add X"): edit the same `SOURCE` file (a pre-existing
+file gets edited in place) and re-run steps 2–4 — no v2 copies.
